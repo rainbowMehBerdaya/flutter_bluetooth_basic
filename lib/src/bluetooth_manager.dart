@@ -11,13 +11,11 @@ class BluetoothManager {
   static const int CONNECTED = 1;
   static const int DISCONNECTED = 0;
 
-  static const MethodChannel _channel =
-      const MethodChannel('$NAMESPACE/methods');
-  static const EventChannel _stateChannel =
-      const EventChannel('$NAMESPACE/state');
+  static const MethodChannel _channel = const MethodChannel('$NAMESPACE/methods');
+  static const EventChannel _stateChannel = const EventChannel('$NAMESPACE/state');
+
   Stream<MethodCall> get _methodStream => _methodStreamController.stream;
-  final StreamController<MethodCall> _methodStreamController =
-      StreamController.broadcast();
+  final StreamController<MethodCall> _methodStreamController = StreamController.broadcast();
 
   BluetoothManager._() {
     _channel.setMethodCallHandler((MethodCall call) {
@@ -36,20 +34,24 @@ class BluetoothManager {
   // Future<bool> get isOn async =>
   //     await _channel.invokeMethod('isOn').then<bool>((d) => d);
 
-  Future<bool> get isConnected async =>
-      await _channel.invokeMethod('isConnected');
+  Future<bool> get isConnected async => await _channel.invokeMethod('isConnected');
 
   BehaviorSubject<bool> _isScanning = BehaviorSubject.seeded(false);
+
   Stream<bool> get isScanning => _isScanning.stream;
 
-  BehaviorSubject<List<BluetoothDevice>> _scanResults =
-      BehaviorSubject.seeded([]);
+  BehaviorSubject<List<BluetoothDevice>> _scanResults = BehaviorSubject.seeded([]);
+
   Stream<List<BluetoothDevice>> get scanResults => _scanResults.stream;
+
+  BehaviorSubject<List<BluetoothDevice>> _scanResultsNonScan = BehaviorSubject.seeded([]);
+
+  Stream<List<BluetoothDevice>> get scanResultsNonScan => _scanResultsNonScan.stream;
 
   PublishSubject _stopScanPill = new PublishSubject();
 
   /// Gets the current state of the Bluetooth module
-  Stream<int> get state async* {
+  Stream<int?> get state async* {
     yield await _channel.invokeMethod('state').then((s) => s);
 
     yield* _stateChannel.receiveBroadcastStream().map((s) => s);
@@ -115,6 +117,48 @@ class BluetoothManager {
   }) async {
     await scan(timeout: timeout).drain();
     return _scanResults.value;
+  }
+
+  Future<bool> enablePermission() async {
+    try {
+      return await _channel.invokeMethod('enablePermission');
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  Future<bool> enableBluetooth() async {
+    try {
+      return await _channel.invokeMethod('enableBluetooth');
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  Future<bool> checkSupportBLE() async {
+    try {
+      return await _channel.invokeMethod('checkSupportBLE');
+    } catch (e) {
+      throw e;
+    }
+  }
+
+  Future<List<BluetoothDevice>> getBondedDevice() async {
+    try {
+      var getBondedDevice = await _channel.invokeMethod('getBondedDevice');
+      List<BluetoothDevice> bondedDevice = [];
+
+      for (var element in getBondedDevice) {
+        BluetoothDevice bluetoothDevice =
+            BluetoothDevice.fromJson(Map<String, dynamic>.from(element));
+        bondedDevice.add(bluetoothDevice);
+      }
+
+      _scanResultsNonScan.add(bondedDevice);
+      return _scanResultsNonScan.value;
+    } catch (e) {
+      throw e;
+    }
   }
 
   /// Stops a scan for Bluetooth Low Energy devices

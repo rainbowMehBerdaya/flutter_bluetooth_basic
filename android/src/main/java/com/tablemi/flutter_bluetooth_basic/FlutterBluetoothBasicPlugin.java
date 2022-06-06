@@ -14,6 +14,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -22,8 +23,10 @@ import androidx.core.content.ContextCompat;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.Vector;
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin;
@@ -37,17 +40,19 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
+import io.flutter.plugin.common.PluginRegistry.ActivityResultListener;
 import io.flutter.plugin.common.PluginRegistry.Registrar;
 import io.flutter.plugin.common.PluginRegistry.RequestPermissionsResultListener;
 
 /**
  * FlutterBluetoothBasicPlugin
  */
-public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHandler, ActivityAware, RequestPermissionsResultListener {
+public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHandler, ActivityAware, ActivityResultListener, RequestPermissionsResultListener {
     private static final String TAG = "BluetoothBasicPlugin";
     private final int id = 0;
     private ThreadPool threadPool;
     private static final int REQUEST_COARSE_LOCATION_PERMISSIONS = 1451;
+    private static final int REQUEST_ENABLE_BLUETOOTH = 1452;
     private static final String NAMESPACE = "flutter_bluetooth_basic";
     private Activity activity;
     private MethodChannel channel;
@@ -57,11 +62,14 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
 
     private Result pendingResult;
 
+    private boolean supportBluetoothLE;
+
     // plugin should still contain the static registerWith() method to remain compatible with apps
     // that don’t use the v2 Android embedding.
     public static void registerWith(Registrar registrar) {
         FlutterBluetoothBasicPlugin instance = new FlutterBluetoothBasicPlugin();
         instance.createChannel(registrar.messenger());
+        registrar.addActivityResultListener(instance);
         registrar.addRequestPermissionsResultListener(instance);
     }
 
@@ -87,19 +95,9 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
             case "isConnected":
                 result.success(threadPool != null);
                 break;
-            case "startScan": {
-                if (ContextCompat.checkSelfPermission(activity, Manifest.permission.ACCESS_COARSE_LOCATION)
-                        != PackageManager.PERMISSION_GRANTED) {
-                    ActivityCompat.requestPermissions(
-                            activity,
-                            new String[]{Manifest.permission.ACCESS_COARSE_LOCATION},
-                            REQUEST_COARSE_LOCATION_PERMISSIONS);
-                    pendingResult = result;
-                    break;
-                }
+            case "startScan":
                 startScan(result);
                 break;
-            }
             case "stopScan":
                 stopScan();
                 result.success(null);
@@ -116,10 +114,99 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
             case "writeData":
                 writeData(result, args);
                 break;
+            case "enablePermission":
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    if (ContextCompat.checkSelfPermission(activity,
+                            Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
+                            ContextCompat.checkSelfPermission(activity,
+                                    Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
+                            ContextCompat.checkSelfPermission(activity,
+                                    Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED ||
+                            ContextCompat.checkSelfPermission(activity,
+                                    Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+
+                        ActivityCompat.requestPermissions(
+                                activity,
+                                new String[]{
+                                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                                        Manifest.permission.BLUETOOTH_SCAN,
+                                        Manifest.permission.BLUETOOTH_CONNECT,
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                },
+                                REQUEST_COARSE_LOCATION_PERMISSIONS
+                        );
+
+                        pendingResult = result;
+                        break;
+                    }
+                } else {
+                    if (ContextCompat.checkSelfPermission(activity,
+                            Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED ||
+                            ContextCompat.checkSelfPermission(activity,
+                                    Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED ||
+                            ContextCompat.checkSelfPermission(activity,
+                                    Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+
+                        ActivityCompat.requestPermissions(
+                                activity,
+                                new String[]{
+                                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                                        Manifest.permission.BLUETOOTH_ADMIN,
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                },
+                                REQUEST_COARSE_LOCATION_PERMISSIONS
+                        );
+
+                        pendingResult = result;
+                        break;
+                    }
+                }
+                result.success(true);
+                break;
+            case "enableBluetooth":
+                if (!bluetoothAdapter.isEnabled()) {
+                    Intent enableBtIntent1 = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+                    activity.startActivityForResult(enableBtIntent1, REQUEST_ENABLE_BLUETOOTH, null);
+                    pendingResult = result;
+                    break;
+                }
+                result.success(true);
+                break;
+            case "checkSupportBLE":
+                if (activity.getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) {
+                    supportBluetoothLE = true;
+                    result.success(true);
+                    break;
+                } else {
+                    supportBluetoothLE = false;
+                    result.success(false);
+                    break;
+                }
+//                result.error("check_failed", "check support for bluetoothLE fail", null);
+//                break;
+            case "getBondedDevice":
+                getBondedDevice(result);
+                break;
             default:
                 result.notImplemented();
                 break;
         }
+    }
+
+    @Override
+    public boolean onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQUEST_ENABLE_BLUETOOTH) {
+            if (resultCode == Activity.RESULT_OK) {
+                pendingResult.success(true);
+                pendingResult = null;
+                return true;
+            } else {
+                pendingResult.error("bluetooth_disable", "User did NOT enabled Bluetooth", null);
+                pendingResult = null;
+                return true;
+            }
+        }
+        return false;
     }
 
     private void state(Result result) {
@@ -153,8 +240,26 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
             startScan();
             result.success(null);
         } catch (Exception e) {
-            result.error("startScan", e.getMessage(), null);
+            result.error("start_scan", e.getMessage(), null);
         }
+    }
+
+    private void getBondedDevice(Result result) {
+        final List<Object> deviceResultMap = new ArrayList<>();
+        Set<BluetoothDevice> pairedDevices = bluetoothAdapter.getBondedDevices();
+
+        if (pairedDevices.size() > 0) {
+            for (BluetoothDevice device : pairedDevices) {
+                final Map<String, Object> ret = new HashMap<>();
+                ret.put("address", device.getAddress());
+                ret.put("name", device.getName());
+                ret.put("type", device.getType());
+
+                deviceResultMap.add(ret);
+            }
+        }
+
+        result.success(deviceResultMap);
     }
 
     private void invokeMethodUIThread(final String name, final BluetoothDevice device) {
@@ -178,12 +283,13 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
 
     private void startScan() throws IllegalStateException {
         BluetoothLeScanner scanner = bluetoothAdapter.getBluetoothLeScanner();
-        if (scanner == null)
+        if (scanner == null) {
             throw new IllegalStateException("getBluetoothLeScanner() is null. Is the Adapter on?");
-
-        // 0:lowPower 1:balanced 2:lowLatency -1:opportunistic
-        ScanSettings settings = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
-        scanner.startScan(null, settings, mScanCallback);
+        } else {
+            // 0:lowPower 1:balanced 2:lowLatency -1:opportunistic
+            ScanSettings settings = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
+            scanner.startScan(null, settings, mScanCallback);
+        }
     }
 
     private void stopScan() {
@@ -257,10 +363,10 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
 
     @Override
     public boolean onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-
         if (requestCode == REQUEST_COARSE_LOCATION_PERMISSIONS) {
             if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                startScan(pendingResult);
+                pendingResult.success(true);
+                pendingResult = null;
             } else {
                 pendingResult.error("no_permissions", "This app requires location permissions for scanning", null);
                 pendingResult = null;
@@ -334,6 +440,7 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
 
         activityPluginBinding = binding;
         binding.addRequestPermissionsResultListener(this);
+        binding.addActivityResultListener(this);
     }
 
     @Override
@@ -350,6 +457,7 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
     public void onDetachedFromActivity() {
         if (activityPluginBinding != null) {
             activityPluginBinding.removeRequestPermissionsResultListener(this);
+            activityPluginBinding.removeActivityResultListener(this);
             activityPluginBinding = null;
         }
     }
