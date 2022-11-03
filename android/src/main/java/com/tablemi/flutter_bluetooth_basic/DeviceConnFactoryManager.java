@@ -408,7 +408,7 @@ public class DeviceConnFactoryManager {
             }
         }
     }
-    public int readDataImmediately(byte[] buffer){
+    public int readDataImmediately(byte[] buffer) throws java.io.IOException {
         int r = 0;
         if (this.mPort == null) {
             return r;
@@ -417,7 +417,7 @@ public class DeviceConnFactoryManager {
         try {
             r =  this.mPort.readData(buffer);
         } catch (IOException e) {
-
+            throw e;
         }
 
         return  r;
