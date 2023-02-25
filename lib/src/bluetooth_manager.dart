@@ -168,8 +168,8 @@ class BluetoothManager {
     _isScanning.add(false);
   }
 
-  Future<dynamic> connect(BluetoothDevice device) =>
-      _channel.invokeMethod('connect', device.toJson());
+  Future<dynamic> connect(BluetoothDevice device) async =>
+      await _channel.invokeMethod('connect', device.toJson());
 
   Future<dynamic> disconnect() => _channel.invokeMethod('disconnect');
 
