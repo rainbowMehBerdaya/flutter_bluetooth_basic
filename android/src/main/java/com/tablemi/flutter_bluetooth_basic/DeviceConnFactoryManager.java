@@ -153,7 +153,7 @@ public class DeviceConnFactoryManager {
         switch (deviceConnFactoryManagers[id].connMethod) {
             case BLUETOOTH:
                 mPort = new BluetoothPort(macAddress);
-                isOpenPort = deviceConnFactoryManagers[id].mPort.openPort();
+                isOpenPort = mPort.openPort();
                 break;
             case USB:
                 mPort = new UsbPort(mContext, mUsbDevice);
