@@ -2,6 +2,7 @@ package com.tablemi.flutter_bluetooth_basic;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.PendingIntent;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
@@ -14,6 +15,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbInterface;
+import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.util.Log;
 
@@ -64,6 +68,8 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
 
     private boolean supportBluetoothLE;
 
+    private static Context context;
+
     // plugin should still contain the static registerWith() method to remain compatible with apps
     // that don’t use the v2 Android embedding.
     public static void registerWith(Registrar registrar) {
@@ -75,6 +81,8 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
 
     @Override
     public void onMethodCall(@NonNull MethodCall call, @NonNull Result result) {
+        context = activity.getApplicationContext();
+
         if (bluetoothAdapter == null && !"isAvailable".equals(call.method)) {
             result.error("bluetooth_unavailable", "Bluetooth is unavailable", null);
             return;
@@ -104,6 +112,9 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
                 break;
             case "connect":
                 connect(result, args);
+                break;
+            case "connectUSB":
+                connectUSB(result);
                 break;
             case "disconnect":
                 result.success(disconnect());
@@ -319,6 +330,76 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
         }
     }
 
+    private void connectUSB(Result result) {
+        disconnect();
+
+        UsbManager usbManager = (UsbManager) activity.getSystemService(Context.USB_SERVICE);
+
+        HashMap<String, UsbDevice> deviceList = usbManager.getDeviceList();
+
+        Set<String> deviceSet = deviceList.keySet();
+        String[] devInfo = new String[deviceSet.size()];
+        deviceSet.toArray(devInfo);
+
+        PendingIntent mPermissionIntent = PendingIntent.getBroadcast(context, 0, new Intent("com.android.example.USB_PERMISSION"), 0);
+
+        UsbDevice usbDevPicked = null;
+
+        for (int i = 0; i < devInfo.length; ++i) {
+            UsbDevice usbDevice = (UsbDevice) deviceList.get(devInfo[i]);
+
+            assert usbDevice != null;
+
+            UsbInterface usbInterface = usbDevice.getInterface(0);
+
+            if (!usbManager.hasPermission(usbDevice)) {
+                usbManager.requestPermission(usbDevice, mPermissionIntent);
+            }
+
+            if (usbInterface.getInterfaceClass() == 7 && usbDevice.getInterfaceCount() > 0) {
+                usbDevPicked = usbDevice;
+                break;
+            }
+        }
+
+//        Iterator<UsbDevice> deviceIterator = deviceList.values().iterator();
+//        while (deviceIterator.hasNext()) {
+//            UsbDevice device = deviceIterator.next();
+//
+//            PendingIntent mPermissionIntent = PendingIntent.getBroadcast(context, 0, new Intent("com.android.example.USB_PERMISSION"), 0);
+//            manager.requestPermission(device, mPermissionIntent);
+//            String Model = device.getDeviceName();
+//
+//            int DeviceID = device.getDeviceId();
+//            int Vendor = device.getVendorId();
+//            int Product = device.getProductId();
+//            int Class = device.getDeviceClass();
+//            int Subclass = device.getDeviceSubclass();
+//
+//            Log.d(TAG, "Model: " + Model);
+//            Log.d(TAG, "DeviceID: " + DeviceID);
+//            Log.d(TAG, "Vendor: " + Vendor);
+//            Log.d(TAG, "Product: " + Product);
+//            Log.d(TAG, "Class: " + Class);
+//            Log.d(TAG, "Subclass: " + Subclass);
+//        }
+
+        new DeviceConnFactoryManager.Build()
+                .setId(id)
+                // Set the connection method
+                .setConnMethod(DeviceConnFactoryManager.CONN_METHOD.USB)
+                // Set the connected USB device
+                .setUsbDevice(usbDevPicked)
+                // Set the context
+                .setContext(context)
+                .build();
+        // Open port
+        threadPool = ThreadPool.getInstantiation();
+        threadPool.addSerialTask(() -> DeviceConnFactoryManager.getDeviceConnFactoryManagers()[id].openPort());
+
+        result.success(true);
+    }
+
     /**
      * Reconnect to recycle the last connected object to avoid memory leaks
      */
@@ -348,13 +429,17 @@ public class FlutterBluetoothBasicPlugin implements FlutterPlugin, MethodCallHan
 
             threadPool = ThreadPool.getInstantiation();
             threadPool.addSerialTask(() -> {
-                Vector<Byte> vectorData = new Vector<>();
-                for (int i = 0; i < bytes.size(); ++i) {
-                    Integer val = bytes.get(i);
-                    vectorData.add(Byte.valueOf(Integer.toString(val > 127 ? val - 256 : val)));
-                }
+                try {
+                    Vector<Byte> vectorData = new Vector<>();
+                    for (int i = 0; i < bytes.size(); ++i) {
+                        Integer val = bytes.get(i);
+                        vectorData.add(Byte.valueOf(Integer.toString(val > 127 ? val - 256 : val)));
+                    }
 
-                DeviceConnFactoryManager.getDeviceConnFactoryManagers()[id].sendDataImmediately(vectorData);
+                    DeviceConnFactoryManager.getDeviceConnFactoryManagers()[id].sendDataImmediately(vectorData);
+                } catch (Exception e) {
+                    result.error("write_failed", e.getMessage(), null);
+                }
             });
         } else {
             result.error("bytes_empty", "Bytes param is empty", null);
